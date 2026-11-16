@@ -32,9 +32,11 @@ instance : Inhabited (M α) := ⟨fun _ => .error "unreachable"⟩
 
 def lineOf (st : St) : Nat := (st.s.extract 0 st.i).foldl (fun n c => if c == '\n' then n + 1 else n) 1
 
+/-- Fail with the code of the specification. Text that is not well-formed YAML is `loading-document-failed` (4.1.3). -/
 def fail (code msg : String) : M α := do
   let st ← get
-  throw s!"{code}: {msg} (line {lineOf st})"
+  if code == "syntax-error" then throw s!"loading-document-failed: syntax: {msg} (line {lineOf st})"
+  else throw s!"{code}: {msg} (line {lineOf st})"
 
 def peekAt (k : Nat) : M (Option Char) := do
   let st ← get
@@ -634,13 +636,23 @@ mutual
 /-- A node in block context. `n` is the indent of the collection that holds it. -/
 partial def blockNode (n : Int) (seqAtN sameLineMapOk : Bool) : M Json := do
   skipInline
-  let save ← get
-  let (anchor, tag) ← parseProps
+  let save0 ← get
+  let (a1, t1) ← parseProps
   let mut sameLine := true
+  let mut save := save0
+  let mut anchor := a1
+  let mut tag := t1
+  let mut lineProps := a1.isSome || t1.isSome
   match ← peek with
   | none | some '\n' =>
     skipBlank
     sameLine := false
+    -- properties may also start the next line, and are those of the key if a key follows them
+    save ← get
+    let (a2, t2) ← parseProps
+    anchor := a2.orElse fun _ => a1
+    tag := t2.orElse fun _ => t1
+    lineProps := a2.isSome || t2.isSome
   | _ => pure ()
   let c ← col
   let atEnd := (← peek).isNone || (← atDocMarker)
@@ -650,6 +662,16 @@ partial def blockNode (n : Int) (seqAtN sameLineMapOk : Bool) : M Json := do
     register anchor j
     return j
   let ch := ((← peek).getD ' ')
+  if lineProps && ch != '|' && ch != '>' && !seqHere && !(ch == '?' && isSep (← peekAt 1)) && (← keyAhead) then
+    -- the properties on this line belong to the first key, not to the mapping; those of the line above are the mapping's
+    if sameLine && !sameLineMapOk then fail "syntax-error" "a block mapping starts on the line of its key"
+    set save
+    skipInline
+    let r ← parseMap (← col)
+    unless sameLine do
+      checkCollectionTag t1 r
+      register a1 r
+    return r
   let j ← if ch == '|' || ch == '>' then
       resolveScalar tag (← readBlockScalar n) false
     else if ch == '-' && seqHere then
@@ -667,12 +689,6 @@ partial def blockNode (n : Int) (seqAtN sameLineMapOk : Bool) : M Json := do
         pure r
     else if (← keyAhead) then
       if sameLine && !sameLineMapOk then fail "syntax-error" "a block mapping starts on the line of its key"
-      else if sameLine && (anchor.isSome || tag.isSome) then
-        -- the properties on this line belong to the first key, not to the mapping
-        set save
-        skipInline
-        let r ← parseMap (← col)
-        pure r
       else
         let r ← parseMap c
         checkCollectionTag tag r
@@ -897,16 +913,28 @@ partial def stream : M (Array Json) := do
     unless (← atDocMarker) do fail "syntax-error" "text follows the document"
   pure docs
 
-/-- Every document of a YAML-LD stream, in order (`extractAllScripts` true). -/
-def parseAll (text : String) : Except String (Array Json) := do
+/-- Every YAML document of a stream, in order, whatever each holds. -/
+def parseAllYaml (text : String) : Except String (Array Json) := do
   let (r, _) ← stream.run { s := normalise text }
   pure r
 
-/-- The first document of the stream (`extractAllScripts` false). -/
+/-- The first YAML document of a stream, or null when it holds none. -/
+def parseYaml (text : String) : Except String Json := do
+  pure ((← parseAllYaml text)[0]?.getD Json.null)
+
+/-- A YAML-LD document is a sequence, a mapping or null; any other root is `loading-document-failed` (4.1.3). -/
+def checkRoot (d : Json) : Except String Json :=
+  match d with
+  | .arr _ | .obj _ | .null => .ok d
+  | _ => .error "loading-document-failed: the document is a scalar; it must be a mapping, a sequence or null"
+
+/-- Every document of a YAML-LD stream, in order (`extractAllScripts` true). -/
+def parseAll (text : String) : Except String (Array Json) := do
+  (← parseAllYaml text).mapM checkRoot
+
+/-- The first document of the stream (`extractAllScripts` false). A stream with no document gives null. -/
 def parse (text : String) : Except String Json := do
-  match (← parseAll text)[0]? with
-  | some d => pure d
-  | none => throw "syntax-error: the stream holds no YAML-LD document"
+  checkRoot (← parseYaml text)
 
 /-! ## Writing -/
 

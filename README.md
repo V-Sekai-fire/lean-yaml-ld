@@ -23,11 +23,11 @@ Then:
 | `YamlLd.render` | a JSON value as a block-style YAML-LD document |
 | `YamlLd.readFile` | the first document of a file; a file that is not UTF-8 is refused |
 
-Errors are strings that start with the specification's code: `mapping-key-error`, `profile-error`, `loading-document-failed`, or `syntax-error` for text that is not YAML.
+Errors are strings that start with the specification's code: `mapping-key-error`, `profile-error`, or `loading-document-failed`, which covers text that is not YAML (the detail follows, as `syntax: ...`), a scalar root, a repeated key, an alias of no anchor and a cycle. `YamlLd.parseYaml` and `parseAllYaml` read any YAML value, with no rule on the root.
 
 ## What the specification asks, and where it is met
 
-- A stream is UTF-8 (4.1.1), and holds one or more documents (4.1.3, 4.4.1).
+- A stream is UTF-8 (4.1.1), and holds documents (4.1.3, 4.4.1). The root of a document is a mapping, a sequence or null; a scalar root is `loading-document-failed`. A stream with none, or with only whitespace and comments, is null for `parse` and empty for `parseAll`.
 - Anchors are copied where aliased and their names are dropped. An anchor that holds its own alias is a cycle and is refused (4.2.1, 4.3).
 - Scalars resolve by the YAML Core Schema. `no`, `yes` and `on` are strings, and `2018-04-01` is a string. `.inf` and `.nan` are refused (4.3.1).
 - Every mapping key is a string (4.4.2). A key may be explicit (`? `), carry an anchor or a tag, or be an alias, if it comes out a string. A mapping, a sequence, a number or an empty key is a `mapping-key-error`.
@@ -44,13 +44,17 @@ JSON is YAML, so a JSON-LD file reads through it too.
 - **INVARIANT**: JSON reads as JSON; a comment, an anchor's name and key order change nothing; writing then reading gives the value back, for hard values and for every file in `tests/`.
 - **CONTROL**: example 6 and the other inputs that must be refused, a changed expectation for each golden, and a file that is not UTF-8.
 
+## The W3C test suite
+
+`tests/conformance.py <yaml-ld>/tests` runs the manifest of https://github.com/json-ld/yaml-ld against `yamlld_conform` (built by `./make.sh`). A negative test must be refused with the manifest's code, and a positive test must read. The output of a positive test is JSON-LD *expanded*, which this reader does not make, so it is not compared. ToRDF, Compact, Flatten and Frame tests, HTML extraction and the Extended Profile are listed as skipped, never as passed. Today: 73 pass, 0 fail, 24 skipped.
+
 ## What it does not have
 
 - Tabs as indentation, and a block mapping on the line of `---`. Each is refused with an error, not read wrongly.
 - JSON-LD processing. This reads YAML-LD into JSON; expansion, compaction and framing are not here.
 - The YAML-LD Extended Profile.
 - The writer lists keys sorted, because `Lean.Json` keeps them sorted. Key order is not data in YAML-LD.
-- A run against the W3C YAML-LD test suite. The checks here are the specification's examples and the cases listed above.
+- Expansion-level checks of the W3C suite. See below for what is run.
 
 ## Licence
 
