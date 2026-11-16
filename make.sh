@@ -2,5 +2,5 @@
 # Build the library and run the checks on the files in tests/.
 set -euo pipefail
 cd "$(dirname "$0")"
-lake build YamlLd yamlld_witness yamlld_conform
+lake build YamlLd JsonLd yamlld_witness jsonld_suite
 .lake/build/bin/yamlld_witness tests/*.yamlld

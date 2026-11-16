@@ -201,7 +201,7 @@ def main (args : List String) : IO UInt32 := do
       { name := "CONTROL an alias of no anchor is refused", ok := refused "a: *nope\n" "loading-document-failed" },
       { name := "CONTROL an anchor that holds its own alias is a cycle and is refused", ok := refused "a: &x [*x]\n" "loading-document-failed" },
       { name := "CONTROL a key given twice is refused", ok := refused "a: 1\na: 2\n" "loading-document-failed" },
-      { name := "CONTROL a tag outside the Core Schema is a profile-error", ok := refused "a: !!timestamp 2018-04-01\n" "profile-error" && refused "a: !ex:thing x\n" "profile-error" },
+      { name := "CONTROL a !! tag outside the Core Schema is a profile-error; a tag of another namespace is ignored", ok := refused "a: !!timestamp 2018-04-01\n" "profile-error" && reads "a: !ex:thing x\nb: !<http://e.org/t> 5\nc: !ex:t [1]\n" "{\"a\":\"x\",\"b\":5,\"c\":[1]}" },
       { name := "CONTROL a %YAML 1.1 directive is a profile-error", ok := refused "%YAML 1.1\n---\na: 1\n" "profile-error" },
       { name := "CONTROL a directive other than %YAML and %TAG is a profile-error", ok := refused "%FOO bar\n---\na: 1\n" "profile-error" },
       -- GOLDEN: the gaps of the first version, now met
@@ -214,11 +214,11 @@ def main (args : List String) : IO UInt32 := do
       { name := "GOLDEN an alias as a key", ok := reads "x: &k name\n*k : 1\n" "{\"x\":\"name\",\"name\":1}" },
       { name := "CONTROL an alias of a non-string as a key is a mapping-key-error", ok := refused "x: &n 5\n*n : 1\n" "mapping-key-error" },
       { name := "GOLDEN a tag on a key: !!str 1 is the string key 1; a sequence entry may start with a tagged key", ok := reads "!!str 1: a\n" "{\"1\":\"a\"}" && reads "- !!str 2: b\n" "[{\"2\":\"b\"}]" },
-      { name := "CONTROL a tag that makes a key a non-string is a mapping-key-error; a tag outside the Core Schema is a profile-error", ok := refused "!!int 1: a\n" "mapping-key-error" && refused "!ex:t k: a\n" "profile-error" },
+      { name := "CONTROL a tag that makes a key a non-string is a mapping-key-error; a tag of another namespace on a key is ignored", ok := refused "!!int 1: a\n" "mapping-key-error" && reads "!ex:t k: a\n" "{\"k\":\"a\"}" },
       { name := "GOLDEN %TAG: a handle that names the Core Schema reads as it", ok := reads "%TAG !e! tag:yaml.org,2002:\n---\na: !e!str 5\nb: !e!int 7\n" "{\"a\":\"5\",\"b\":7}" },
       { name := "GOLDEN %TAG may redefine !! and ! ; a verbatim !<tag:yaml.org,2002:str> is !!str", ok := reads "%TAG !! tag:yaml.org,2002:\n---\na: !!str 5\n" "{\"a\":\"5\"}" && reads "a: !<tag:yaml.org,2002:str> 5\nb: !<tag:yaml.org,2002:int> 5\n" "{\"a\":\"5\",\"b\":5}" },
-      { name := "CONTROL %TAG: a handle that names another namespace is a profile-error; an undeclared handle, a repeated one and a bad one are syntax-errors",
-        ok := refused "%TAG !e! tag:example.com,2000:\n---\na: !e!x 1\n" "profile-error" && refused "a: !e!str 1\n" "loading-document-failed"
+      { name := "CONTROL %TAG: a handle that names another namespace is ignored; an undeclared handle, a repeated one and a bad one are syntax-errors",
+        ok := reads "%TAG !e! tag:example.com,2000:\n---\na: !e!x 1\n" "{\"a\":1}" && refused "a: !e!str 1\n" "loading-document-failed"
           && refused "%TAG !e! x:\n%TAG !e! y:\n---\na: 1\n" "loading-document-failed" && refused "%TAG e x:\n---\na: 1\n" "loading-document-failed" && refused "%TAG !e!\n---\na: 1\n" "loading-document-failed" },
       { name := "CONTROL a %TAG holds for its document only: the next document has no such handle", ok := refused "%TAG !e! tag:yaml.org,2002:\n---\na: !e!str 5\n...\n---\nb: !e!str 5\n" "loading-document-failed" && (match YamlLd.parse "%TAG !e! tag:yaml.org,2002:\n---\na: !e!str 5\n" with | .ok _ => true | .error _ => false) },
       { name := "CONTROL a tab as indentation is refused", ok := refused "a:\n\tb: 1\n" "loading-document-failed" },
@@ -236,6 +236,7 @@ def main (args : List String) : IO UInt32 := do
       { name := "CONTROL the same scalar root is a value to `parseYaml`, which has no such rule", ok := (y "42\n").toOption == some (j "42") },
       { name := "GOLDEN properties on the line after a key belong to its value: an anchor on a scalar below its key, and an alias of it",
         ok := reads "a:\n  &x \"v\"\nb:\n  *x\n" "{\"a\":\"v\",\"b\":\"v\"}" },
+      { name := "GOLDEN properties alone on a line belong to the mapping on the next line, and an alias of the anchor copies it", ok := reads "a:\n  &m\n  k: 1\nb: *m\n" "{\"a\":{\"k\":1},\"b\":{\"k\":1}}" },
       { name := "GOLDEN properties on the line after a key, before a key, belong to that key", ok := reads "m:\n  &k a: 1\n  b: *k\n" "{\"m\":{\"a\":1,\"b\":\"a\"}}" },
       { name := "CONTROL an anchor above a mapping is the mapping's: an alias inside it is a cycle", ok := refused "&m\na: *m\n" "loading-document-failed" },
       -- GOLDEN: the Core Schema
