@@ -46,21 +46,23 @@ JSON is YAML, so a JSON-LD file reads through it too.
 
 ## The JSON-LD processor
 
-`JsonLd` is a JSON-LD 1.1 processor in Lean: IRI resolution (RFC 3986), context processing, IRI expansion and the expansion algorithm, with scoped contexts, `@import`, `@nest`, `@reverse`, `@json`, index, id, type, language and graph maps, and protected terms. `JsonLd.expand` takes a `Lean.Json` document, a base IRI and a document loader. `JsonLd.flattenExpanded` flattens, `JsonLd.compactDoc` compacts against a context, and `JsonLd.toRdfQuads` writes N-Quads. `JsonLd.fromRdf` reads N-Quads and `JsonLd.frameDoc` frames. HTML `<script>` extraction and loading over HTTP are not written, so this is not yet a conformant implementation in the sense of section 2.2.
+`JsonLd` is a JSON-LD 1.1 processor in Lean: IRI resolution (RFC 3986), context processing, IRI expansion and the expansion algorithm, with scoped contexts, `@import`, `@nest`, `@reverse`, `@json`, index, id, type, language and graph maps, and protected terms. `JsonLd.expand` takes a `Lean.Json` document, a base IRI and a document loader. `JsonLd.flattenExpanded` flattens, `JsonLd.compactDoc` compacts against a context, and `JsonLd.toRdfQuads` writes N-Quads. `JsonLd.fromRdf` reads N-Quads and `JsonLd.frameDoc` frames. The library does not read HTML or fetch over HTTP: the test runner finds `<script>` elements with `HtmlScripts` and loads documents from disk, and the library takes a document loader as a callback. `JsonLd.Remote.load` makes the document loader's decisions (redirects, the `Link` header, the content type) over any transport function; the test runner answers it from the manifest's options instead of a socket.
 
 ## The W3C test suites
 
-`jsonld_suite <tests-dir> <manifest>` runs the expand, toRdf, fromRdf, flatten, compact and frame tests of a manifest (`./run-suite.sh` runs each test in its own process with a time limit). A negative test must give the manifest's error code, and a positive test must give the expected output, with arrays compared as sets except in `@list`. Other test kinds, HTML extraction, and tests of remote loading by HTTP are listed as skipped, never as passed.
+`jsonld_suite <tests-dir> <manifest>` runs the expand, toRdf, fromRdf, flatten, compact and frame tests of a manifest (`./run-suite.sh` runs each test in its own process with a time limit). A negative test must give the manifest's error code, and a positive test must give the expected output, with arrays compared as sets except in `@list`. Other test kinds, and tests of remote loading by HTTP are listed as skipped. A test that names a document outside the suite fetches it with `curl`, since Lean's standard library has no TLS client; a fetch that fails skips the test, never as passed.
 
 | Manifest | Pass | Fail | Skipped |
 | --- | --- | --- | --- |
 | json-ld-api `expand-manifest.jsonld` | 368 | 0 | 18 |
 | json-ld-api `toRdf-manifest.jsonld` | 432 | 0 | 35 |
 | json-ld-api `fromRdf-manifest.jsonld` | 53 | 0 | 1 |
+| json-ld-api `html-manifest.jsonld` | 49 | 0 | 1 |
+| json-ld-api `remote-doc-manifest.jsonld` | 18 | 0 | 0 |
 | json-ld-api `flatten-manifest.jsonld` | 55 | 0 | 3 |
 | json-ld-api `compact-manifest.jsonld` | 233 | 0 | 13 |
 | json-ld-framing `frame-manifest.jsonld` | 73 | 0 | 19 |
-| yaml-ld `manifest.jsonld` (expand, toRdf, flatten, compact) | 88 | 0 | 9 |
+| yaml-ld `manifest.jsonld` (expand, toRdf, flatten, compact) | 92 | 0 | 5 |
 
 Where YAML-LD and JSON-LD disagree, YAML-LD wins, for documents read from a YAML-LD file (`.yamlld`, `.yaml`): a context document may be a bare context with no `@context` entry (`Cfg.bareContext`), and a top-level node whose properties were all null keeps its `@id` (`ExpOpts.keepIdOnly`). JSON-LD documents follow the JSON-LD API as before.
 

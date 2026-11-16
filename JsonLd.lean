@@ -1107,6 +1107,8 @@ def toRdfQuads (expanded : Json) (o : RdfOpts) : PM (List String) := do
 structure CompOpts where
   compactArrays : Bool := true
   relative : Bool := true
+  /-- Flattening with a context always puts the nodes under `@graph`, even a single one. -/
+  graph : Bool := false
 
 def setAbs (j : Json) (k : String) (v : Json) : Json := if has j k then j else setKey j k v
 
@@ -1577,6 +1579,7 @@ def compactDoc (expanded : Json) (context : Json) (baseIri : Option String) (o :
   | .arr a =>
     if a.isEmpty then c := Json.mkObj []
     else c := Json.mkObj [(← alias, c)]
+  | .obj _ => if o.graph && !has c "@graph" then c := Json.mkObj [(← alias, Json.arr #[c])]
   | _ => pure ()
   let ctxEmpty := match ctxVal with | .null => true | .obj _ => (entries ctxVal).isEmpty | .arr a => a.isEmpty | _ => false
   if !ctxEmpty then c := setKey c "@context" ctxVal
