@@ -23,7 +23,7 @@ jobs:
           git clone --depth 1 https://github.com/json-ld/yaml-ld /tmp/yaml-ld
       - name: JSON-LD API suites
         run: |
-          for m in expand toRdf fromRdf flatten compact; do
+          for m in expand toRdf fromRdf flatten compact html remote-doc; do
             echo "== $m"
             .lake/build/bin/jsonld_suite /tmp/json-ld-api/tests /tmp/json-ld-api/tests/$m-manifest.jsonld | tail -5
             test "${PIPESTATUS[0]}" = 0
