@@ -10,7 +10,7 @@ What the specification asks, and where it is met:
 - 4.3.1: scalars resolve by the YAML Core Schema. `no`, `yes` and `on` are strings. `2018-04-01` is a string. `.inf` and `.nan` are refused.
 - 4.4.2: every mapping key is a string, or `mapping-key-error`. A mapping used as a key is refused the same way. A key may be
   explicit (`? `), and may carry an anchor, a tag or be an alias, so long as it comes out a string.
-- Comments are whitespace. Tags are only those of the Core Schema (a `%TAG` handle or a verbatim `!<...>` that names one is the same tag); any other is a `profile-error`.
+- Comments are whitespace. A tag of the Core Schema forces its type (a `%TAG` handle or a verbatim `!<...>` that names one is the same tag); a tag of another namespace adds no meaning and is ignored (4.3.1).
 
 The reader takes block and flow collections, plain, single- and double-quoted scalars, literal and folded block scalars, anchors,
 aliases, comments, `%YAML` and document markers. JSON is YAML, so a JSON-LD file reads through it too.
@@ -283,14 +283,15 @@ def resolveScalar (tag : Option String) (text : String) (plain : Bool) : M Json 
       (t == "!!float" && isNum j)
     if ["!!null", "!!bool", "!!int", "!!float"].contains t then
       if ok then pure j else fail "loading-document-failed" s!"{text} is not a {t}"
-    else fail "profile-error" s!"the tag {t} is not in the Core Schema"
+    else if t.startsWith "!!" then fail "profile-error" s!"the tag {t} is not in the Core Schema"
+    else if plain then viaCore else pure (Json.str text)   -- a tag of another namespace adds no meaning (4.3.1): read as untagged
 
 def checkCollectionTag (tag : Option String) (j : Json) : M Unit :=
   match tag with
   | none | some "!" => pure ()
   | some "!!map" => (match j with | .obj _ => pure () | _ => fail "loading-document-failed" "!!map on a non-mapping")
   | some "!!seq" => (match j with | .arr _ => pure () | _ => fail "loading-document-failed" "!!seq on a non-sequence")
-  | some t => fail "profile-error" s!"the tag {t} is not in the Core Schema"
+  | some t => if t.startsWith "!!" then fail "profile-error" s!"the tag {t} is not in the Core Schema" else pure ()
 
 def register (anchor : Option String) (j : Json) : M Unit :=
   match anchor with
@@ -653,6 +654,10 @@ partial def blockNode (n : Int) (seqAtN sameLineMapOk : Bool) : M Json := do
     anchor := a2.orElse fun _ => a1
     tag := t2.orElse fun _ => t1
     lineProps := a2.isSome || t2.isSome
+    -- properties alone on a line belong to the node that starts on the next one
+    if lineProps && ((← peek).isNone || (← peek) == some '\n') then
+      skipBlank
+      lineProps := false
   | _ => pure ()
   let c ← col
   let atEnd := (← peek).isNone || (← atDocMarker)

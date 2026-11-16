@@ -16,3 +16,19 @@ jobs:
           echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
       - name: Build and check
         run: ./make.sh
+      - name: Fetch the W3C test suites
+        run: |
+          git clone --depth 1 https://github.com/w3c/json-ld-api /tmp/json-ld-api
+          git clone --depth 1 https://github.com/w3c/json-ld-framing /tmp/json-ld-framing
+          git clone --depth 1 https://github.com/json-ld/yaml-ld /tmp/yaml-ld
+      - name: JSON-LD API suites
+        run: |
+          for m in expand toRdf fromRdf flatten compact; do
+            echo "== $m"
+            .lake/build/bin/jsonld_suite /tmp/json-ld-api/tests /tmp/json-ld-api/tests/$m-manifest.jsonld | tail -5
+            test "${PIPESTATUS[0]}" = 0
+          done
+      - name: JSON-LD framing suite
+        run: .lake/build/bin/jsonld_suite /tmp/json-ld-framing/tests /tmp/json-ld-framing/tests/frame-manifest.jsonld | tail -5; test "${PIPESTATUS[0]}" = 0
+      - name: YAML-LD suite
+        run: .lake/build/bin/jsonld_suite /tmp/yaml-ld/tests /tmp/yaml-ld/tests/manifest.jsonld | tail -5; test "${PIPESTATUS[0]}" = 0

@@ -31,7 +31,7 @@ Errors are strings that start with the specification's code: `mapping-key-error`
 - Anchors are copied where aliased and their names are dropped. An anchor that holds its own alias is a cycle and is refused (4.2.1, 4.3).
 - Scalars resolve by the YAML Core Schema. `no`, `yes` and `on` are strings, and `2018-04-01` is a string. `.inf` and `.nan` are refused (4.3.1).
 - Every mapping key is a string (4.4.2). A key may be explicit (`? `), carry an anchor or a tag, or be an alias, if it comes out a string. A mapping, a sequence, a number or an empty key is a `mapping-key-error`.
-- Comments are whitespace. `%TAG` handles, `!<...>` verbatim tags and `!!` are expanded, so a tag in the yaml.org namespace is the Core Schema tag whatever it is spelt as. A tag outside the Core Schema, and any directive but `%YAML 1.2` and `%TAG`, is a `profile-error`.
+- Comments are whitespace. `%TAG` handles, `!<...>` verbatim tags and `!!` are expanded, so a tag in the yaml.org namespace is the Core Schema tag whatever it is spelt as. A tag of another namespace is ignored, as 4.3.1 gives it no meaning; a `!!` tag outside the Core Schema, and any directive but `%YAML 1.2` and `%TAG`, is a `profile-error`.
 - A number keeps its digits: `100.0` stays `100.0` and `1.50` stays `1.50`.
 
 JSON is YAML, so a JSON-LD file reads through it too.
@@ -44,9 +44,25 @@ JSON is YAML, so a JSON-LD file reads through it too.
 - **INVARIANT**: JSON reads as JSON; a comment, an anchor's name and key order change nothing; writing then reading gives the value back, for hard values and for every file in `tests/`.
 - **CONTROL**: example 6 and the other inputs that must be refused, a changed expectation for each golden, and a file that is not UTF-8.
 
-## The W3C test suite
+## The JSON-LD processor
 
-`tests/conformance.py <yaml-ld>/tests` runs the manifest of https://github.com/json-ld/yaml-ld against `yamlld_conform` (built by `./make.sh`). A negative test must be refused with the manifest's code, and a positive test must read. The output of a positive test is JSON-LD *expanded*, which this reader does not make, so it is not compared. ToRDF, Compact, Flatten and Frame tests, HTML extraction and the Extended Profile are listed as skipped, never as passed. Today: 73 pass, 0 fail, 24 skipped.
+`JsonLd` is a JSON-LD 1.1 processor in Lean: IRI resolution (RFC 3986), context processing, IRI expansion and the expansion algorithm, with scoped contexts, `@import`, `@nest`, `@reverse`, `@json`, index, id, type, language and graph maps, and protected terms. `JsonLd.expand` takes a `Lean.Json` document, a base IRI and a document loader. `JsonLd.flattenExpanded` flattens, `JsonLd.compactDoc` compacts against a context, and `JsonLd.toRdfQuads` writes N-Quads. `JsonLd.fromRdf` reads N-Quads and `JsonLd.frameDoc` frames. HTML `<script>` extraction and loading over HTTP are not written, so this is not yet a conformant implementation in the sense of section 2.2.
+
+## The W3C test suites
+
+`jsonld_suite <tests-dir> <manifest>` runs the expand, toRdf, fromRdf, flatten, compact and frame tests of a manifest (`./run-suite.sh` runs each test in its own process with a time limit). A negative test must give the manifest's error code, and a positive test must give the expected output, with arrays compared as sets except in `@list`. Other test kinds, HTML extraction, and tests of remote loading by HTTP are listed as skipped, never as passed.
+
+| Manifest | Pass | Fail | Skipped |
+| --- | --- | --- | --- |
+| json-ld-api `expand-manifest.jsonld` | 368 | 0 | 18 |
+| json-ld-api `toRdf-manifest.jsonld` | 432 | 0 | 35 |
+| json-ld-api `fromRdf-manifest.jsonld` | 53 | 0 | 1 |
+| json-ld-api `flatten-manifest.jsonld` | 55 | 0 | 3 |
+| json-ld-api `compact-manifest.jsonld` | 233 | 0 | 13 |
+| json-ld-framing `frame-manifest.jsonld` | 73 | 0 | 19 |
+| yaml-ld `manifest.jsonld` (expand, toRdf, flatten, compact) | 88 | 0 | 9 |
+
+Where YAML-LD and JSON-LD disagree, YAML-LD wins, for documents read from a YAML-LD file (`.yamlld`, `.yaml`): a context document may be a bare context with no `@context` entry (`Cfg.bareContext`), and a top-level node whose properties were all null keeps its `@id` (`ExpOpts.keepIdOnly`). JSON-LD documents follow the JSON-LD API as before.
 
 ## What it does not have
 
