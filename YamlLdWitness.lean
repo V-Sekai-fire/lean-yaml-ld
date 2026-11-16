@@ -12,7 +12,10 @@ structure Check where
   name : String
   ok : Bool
 
-def y (t : String) : Except String Json := YamlLd.parse t
+/-- Any YAML value; the YAML-LD rule on the root is checked on its own, with `ld`. -/
+def y (t : String) : Except String Json := YamlLd.parseYaml t
+
+def ld (t : String) : Except String Json := YamlLd.parse t
 
 def j (t : String) : Json := (Json.parse t).toOption.getD Json.null
 
@@ -191,7 +194,7 @@ def main (args : List String) : IO UInt32 := do
       { name := "CONTROL a number as a key is a mapping-key-error", ok := refused "1: a\n" "mapping-key-error" },
       { name := "CONTROL a boolean as a key is a mapping-key-error", ok := refused "true: a\n" "mapping-key-error" },
       { name := "CONTROL a null as a key is a mapping-key-error", ok := refused "~: a\n" "mapping-key-error" },
-      { name := "CONTROL an unquoted @context key is refused: @ is reserved, so the key must be quoted", ok := refused "@context: x\n" "syntax-error" && reads "\"@context\": x\n" "{\"@context\":\"x\"}" },
+      { name := "CONTROL an unquoted @context key is refused: @ is reserved, so the key must be quoted", ok := refused "@context: x\n" "loading-document-failed" && reads "\"@context\": x\n" "{\"@context\":\"x\"}" },
       { name := "CONTROL a quoted number as a key is fine", ok := reads "\"1\": a\n" "{\"1\":\"a\"}" },
       { name := "CONTROL .inf, -.inf and .nan are refused (no JSON form)",
         ok := refused "a: .inf\n" "loading-document-failed" && refused "a: -.inf\n" "loading-document-failed" && refused "a: .nan\n" "loading-document-failed" },
@@ -200,14 +203,41 @@ def main (args : List String) : IO UInt32 := do
       { name := "CONTROL a key given twice is refused", ok := refused "a: 1\na: 2\n" "loading-document-failed" },
       { name := "CONTROL a tag outside the Core Schema is a profile-error", ok := refused "a: !!timestamp 2018-04-01\n" "profile-error" && refused "a: !ex:thing x\n" "profile-error" },
       { name := "CONTROL a %YAML 1.1 directive is a profile-error", ok := refused "%YAML 1.1\n---\na: 1\n" "profile-error" },
-      { name := "CONTROL a %TAG directive is a profile-error", ok := refused "%TAG ! tag:example.com,2000:\n---\na: 1\n" "profile-error" },
-      { name := "CONTROL a tab as indentation is refused", ok := refused "a:\n\tb: 1\n" "syntax-error" },
-      { name := "CONTROL a badly indented entry is refused", ok := refused "a:\n  b: 1\n c: 2\n" "syntax-error" },
-      { name := "CONTROL an unclosed quote is refused", ok := refused "a: \"open\n" "syntax-error" },
-      { name := "CONTROL an unclosed flow sequence is refused", ok := refused "a: [1, 2\n" "syntax-error" },
-      { name := "CONTROL a mapping on the line of its key is refused", ok := refused "a: b: c\n" "syntax-error" },
-      { name := "CONTROL a stream with no document is refused by `parse` and empty for `parseAll`",
-        ok := refused "# nothing\n" "syntax-error" && (match YamlLd.parseAll "# nothing\n" with | .ok ds => ds.isEmpty | .error _ => false) },
+      { name := "CONTROL a directive other than %YAML and %TAG is a profile-error", ok := refused "%FOO bar\n---\na: 1\n" "profile-error" },
+      -- GOLDEN: the gaps of the first version, now met
+      { name := "GOLDEN a complex key (? ) that is a string, with its value on a line of its own, or none", ok := reads "? a\n: 1\n? \"b c\"\n: [x]\n? d\ne: 2\n" "{\"a\":1,\"b c\":[\"x\"],\"d\":null,\"e\":2}" },
+      { name := "GOLDEN a complex key that is a block scalar, and a nested mapping with complex keys", ok := reads "? |-\n  multi\n  line\n: 1\nm:\n  ? k\n  : v\n" "{\"multi\\nline\":1,\"m\":{\"k\":\"v\"}}" },
+      { name := "CONTROL a complex key that is a mapping, a sequence, a number or empty is a mapping-key-error",
+        ok := refused "? {a: 1}\n: x\n" "mapping-key-error" && refused "? - a\n: x\n" "mapping-key-error" && refused "? 1\n: x\n" "mapping-key-error" && refused "?\n: x\n" "mapping-key-error" },
+      { name := "GOLDEN ? in a flow mapping and a flow sequence", ok := reads "{? a : 1, ? b}\n" "{\"a\":1,\"b\":null}" && reads "[? a : 1, ? b]\n" "[{\"a\":1},{\"b\":null}]" },
+      { name := "GOLDEN an anchor on a key, and an alias of it as a value", ok := reads "&k a: 1\nb: *k\n" "{\"a\":1,\"b\":\"a\"}" },
+      { name := "GOLDEN an alias as a key", ok := reads "x: &k name\n*k : 1\n" "{\"x\":\"name\",\"name\":1}" },
+      { name := "CONTROL an alias of a non-string as a key is a mapping-key-error", ok := refused "x: &n 5\n*n : 1\n" "mapping-key-error" },
+      { name := "GOLDEN a tag on a key: !!str 1 is the string key 1; a sequence entry may start with a tagged key", ok := reads "!!str 1: a\n" "{\"1\":\"a\"}" && reads "- !!str 2: b\n" "[{\"2\":\"b\"}]" },
+      { name := "CONTROL a tag that makes a key a non-string is a mapping-key-error; a tag outside the Core Schema is a profile-error", ok := refused "!!int 1: a\n" "mapping-key-error" && refused "!ex:t k: a\n" "profile-error" },
+      { name := "GOLDEN %TAG: a handle that names the Core Schema reads as it", ok := reads "%TAG !e! tag:yaml.org,2002:\n---\na: !e!str 5\nb: !e!int 7\n" "{\"a\":\"5\",\"b\":7}" },
+      { name := "GOLDEN %TAG may redefine !! and ! ; a verbatim !<tag:yaml.org,2002:str> is !!str", ok := reads "%TAG !! tag:yaml.org,2002:\n---\na: !!str 5\n" "{\"a\":\"5\"}" && reads "a: !<tag:yaml.org,2002:str> 5\nb: !<tag:yaml.org,2002:int> 5\n" "{\"a\":\"5\",\"b\":5}" },
+      { name := "CONTROL %TAG: a handle that names another namespace is a profile-error; an undeclared handle, a repeated one and a bad one are syntax-errors",
+        ok := refused "%TAG !e! tag:example.com,2000:\n---\na: !e!x 1\n" "profile-error" && refused "a: !e!str 1\n" "loading-document-failed"
+          && refused "%TAG !e! x:\n%TAG !e! y:\n---\na: 1\n" "loading-document-failed" && refused "%TAG e x:\n---\na: 1\n" "loading-document-failed" && refused "%TAG !e!\n---\na: 1\n" "loading-document-failed" },
+      { name := "CONTROL a %TAG holds for its document only: the next document has no such handle", ok := refused "%TAG !e! tag:yaml.org,2002:\n---\na: !e!str 5\n...\n---\nb: !e!str 5\n" "loading-document-failed" && (match YamlLd.parse "%TAG !e! tag:yaml.org,2002:\n---\na: !e!str 5\n" with | .ok _ => true | .error _ => false) },
+      { name := "CONTROL a tab as indentation is refused", ok := refused "a:\n\tb: 1\n" "loading-document-failed" },
+      { name := "CONTROL a badly indented entry is refused", ok := refused "a:\n  b: 1\n c: 2\n" "loading-document-failed" },
+      { name := "CONTROL an unclosed quote is refused", ok := refused "a: \"open\n" "loading-document-failed" },
+      { name := "CONTROL an unclosed flow sequence is refused", ok := refused "a: [1, 2\n" "loading-document-failed" },
+      { name := "CONTROL a mapping on the line of its key is refused", ok := refused "a: b: c\n" "loading-document-failed" },
+      { name := "GOLDEN a stream with no document, or only whitespace or comments, is null for `parse` and empty for `parseAll`",
+        ok := (ld "# nothing\n").toOption == some Json.null && (ld "").toOption == some Json.null && (ld "  \n\n").toOption == some Json.null
+          && (match YamlLd.parseAll "# nothing\n" with | .ok ds => ds.isEmpty | .error _ => false) },
+      { name := "GOLDEN the root of a document is a mapping, a sequence or null", ok := (ld "a: 1\n").toOption.isSome && (ld "[1]\n").toOption.isSome && (ld "~\n").toOption == some Json.null },
+      { name := "CONTROL a scalar root is loading-document-failed (4.1.3): a string, number, boolean or quoted null, in `parse` and `parseAll`",
+        ok := ["text", "42", "1.5", "true", "\"null\"", "\"~\"", "---\nx\n---\na: 1\n"].all (fun d => (match ld d with | .error e => e.startsWith "loading-document-failed" | .ok _ => false)
+                  || (match YamlLd.parseAll d with | .error e => e.startsWith "loading-document-failed" | .ok _ => false)) },
+      { name := "CONTROL the same scalar root is a value to `parseYaml`, which has no such rule", ok := (y "42\n").toOption == some (j "42") },
+      { name := "GOLDEN properties on the line after a key belong to its value: an anchor on a scalar below its key, and an alias of it",
+        ok := reads "a:\n  &x \"v\"\nb:\n  *x\n" "{\"a\":\"v\",\"b\":\"v\"}" },
+      { name := "GOLDEN properties on the line after a key, before a key, belong to that key", ok := reads "m:\n  &k a: 1\n  b: *k\n" "{\"m\":{\"a\":1,\"b\":\"a\"}}" },
+      { name := "CONTROL an anchor above a mapping is the mapping's: an alias inside it is a cycle", ok := refused "&m\na: *m\n" "loading-document-failed" },
       -- GOLDEN: the Core Schema
       { name := "GOLDEN no, yes, on, off, y and NO are strings, not booleans (the Norway problem)",
         ok := reads "a: [no, yes, on, off, y, n, NO, Yes]\n" "{\"a\":[\"no\",\"yes\",\"on\",\"off\",\"y\",\"n\",\"NO\",\"Yes\"]}" },
