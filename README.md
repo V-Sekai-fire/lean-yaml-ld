@@ -44,9 +44,20 @@ JSON is YAML, so a JSON-LD file reads through it too.
 - **INVARIANT**: JSON reads as JSON; a comment, an anchor's name and key order change nothing; writing then reading gives the value back, for hard values and for every file in `tests/`.
 - **CONTROL**: example 6 and the other inputs that must be refused, a changed expectation for each golden, and a file that is not UTF-8.
 
-## The W3C test suite
+## The JSON-LD processor
 
-`tests/conformance.py <yaml-ld>/tests` runs the manifest of https://github.com/json-ld/yaml-ld against `yamlld_conform` (built by `./make.sh`). A negative test must be refused with the manifest's code, and a positive test must read. The output of a positive test is JSON-LD *expanded*, which this reader does not make, so it is not compared. ToRDF, Compact, Flatten and Frame tests, HTML extraction and the Extended Profile are listed as skipped, never as passed. Today: 73 pass, 0 fail, 24 skipped.
+`JsonLd` is a JSON-LD 1.1 processor in Lean: IRI resolution (RFC 3986), context processing, IRI expansion and the expansion algorithm, with scoped contexts, `@import`, `@nest`, `@reverse`, `@json`, index, id, type, language and graph maps, and protected terms. `JsonLd.expand` takes a `Lean.Json` document, a base IRI and a document loader. Compaction, flattening, RDF conversion and framing are not written yet, so this is not yet a conformant implementation in the sense of section 2.2.
+
+## The W3C test suites
+
+`jsonld_suite <tests-dir> <manifest>` runs the expand tests of a manifest (`./run-suite.sh` runs each test in its own process with a time limit). A negative test must give the manifest's error code, and a positive test must give the expected output, with arrays compared as sets except in `@list`. Other test kinds, HTML extraction, and tests of remote loading by HTTP are listed as skipped, never as passed.
+
+| Manifest | Pass | Fail | Skipped |
+| --- | --- | --- | --- |
+| json-ld-api `expand-manifest.jsonld` | 368 | 0 | 18 |
+| yaml-ld `manifest.jsonld` | 54 | 19 | 24 |
+
+The 19 failures are the `core-*` tests of the YAML-LD suite. Each loads a context document that is a bare context (`"@vocab": ...`, with no `@context` key), which the JSON-LD API suite requires to be an `invalid remote context`. The two suites disagree, and this processor follows the JSON-LD API.
 
 ## What it does not have
 
