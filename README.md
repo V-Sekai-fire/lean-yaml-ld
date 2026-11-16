@@ -30,8 +30,8 @@ Errors are strings that start with the specification's code: `mapping-key-error`
 - A stream is UTF-8 (4.1.1), and holds one or more documents (4.1.3, 4.4.1).
 - Anchors are copied where aliased and their names are dropped. An anchor that holds its own alias is a cycle and is refused (4.2.1, 4.3).
 - Scalars resolve by the YAML Core Schema. `no`, `yes` and `on` are strings, and `2018-04-01` is a string. `.inf` and `.nan` are refused (4.3.1).
-- Every mapping key is a string (4.4.2).
-- Comments are whitespace. A tag outside the Core Schema, and any directive but `%YAML 1.2`, is a `profile-error`.
+- Every mapping key is a string (4.4.2). A key may be explicit (`? `), carry an anchor or a tag, or be an alias, if it comes out a string. A mapping, a sequence, a number or an empty key is a `mapping-key-error`.
+- Comments are whitespace. `%TAG` handles, `!<...>` verbatim tags and `!!` are expanded, so a tag in the yaml.org namespace is the Core Schema tag whatever it is spelt as. A tag outside the Core Schema, and any directive but `%YAML 1.2` and `%TAG`, is a `profile-error`.
 - A number keeps its digits: `100.0` stays `100.0` and `1.50` stays `1.50`.
 
 JSON is YAML, so a JSON-LD file reads through it too.
@@ -46,7 +46,7 @@ JSON is YAML, so a JSON-LD file reads through it too.
 
 ## What it does not have
 
-- Complex keys (`? `), `%TAG`, and anchors, tags or aliases on a mapping key. Each is refused with an error, not read wrongly.
+- Tabs as indentation, and a block mapping on the line of `---`. Each is refused with an error, not read wrongly.
 - JSON-LD processing. This reads YAML-LD into JSON; expansion, compaction and framing are not here.
 - The YAML-LD Extended Profile.
 - The writer lists keys sorted, because `Lean.Json` keeps them sorted. Key order is not data in YAML-LD.

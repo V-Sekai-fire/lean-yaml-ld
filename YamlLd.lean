@@ -8,12 +8,13 @@ What the specification asks, and where it is met:
 - 4.2.1 and 4.3: anchors are copied where aliased and their names are dropped. An alias of an anchor that is not yet complete
   would be a cycle, and is refused.
 - 4.3.1: scalars resolve by the YAML Core Schema. `no`, `yes` and `on` are strings. `2018-04-01` is a string. `.inf` and `.nan` are refused.
-- 4.4.2: every mapping key is a string, or `mapping-key-error`. A mapping used as a key is refused the same way.
-- Comments are whitespace. Tags are only those of the Core Schema; any other is a `profile-error`.
+- 4.4.2: every mapping key is a string, or `mapping-key-error`. A mapping used as a key is refused the same way. A key may be
+  explicit (`? `), and may carry an anchor, a tag or be an alias, so long as it comes out a string.
+- Comments are whitespace. Tags are only those of the Core Schema (a `%TAG` handle or a verbatim `!<...>` that names one is the same tag); any other is a `profile-error`.
 
 The reader takes block and flow collections, plain, single- and double-quoted scalars, literal and folded block scalars, anchors,
 aliases, comments, `%YAML` and document markers. JSON is YAML, so a JSON-LD file reads through it too.
-Not taken, and refused with an error code: `? ` complex keys, `%TAG`, an alias or properties on a mapping key, tabs as indentation. -/
+Not taken, and refused with an error code: tabs as indentation. -/
 
 namespace YamlLd
 open Lean
@@ -22,6 +23,8 @@ structure St where
   s : Array Char
   i : Nat := 0
   anchors : List (String × Json) := []
+  /-- `%TAG` handles of the current document, as (handle, prefix). -/
+  tags : List (String × String) := []
 
 abbrev M := StateT St (Except String)
 
@@ -126,6 +129,47 @@ def readName : M String := do
     | none => break
   pure r
 
+/-- The tag URI of a handle: one a `%TAG` gave, else the default of `!` and `!!` (YAML 1.2, 6.8.2.2). -/
+def handlePrefix (h : String) : M (Option String) := do
+  match (← get).tags.lookup h with
+  | some p => pure (some p)
+  | none => pure (if h == "!!" then some "tag:yaml.org,2002:" else if h == "!" then some "!" else none)
+
+/-- A tag as written (`!!str`, `!e!x`, `!<uri>`), as its Core Schema short form `!!x` when it is in the yaml.org namespace,
+else as its full URI. `!` alone stays `!`, the non-specific tag. -/
+def readTag : M String := do
+  let canon (uri : String) : String :=
+    if uri.startsWith "tag:yaml.org,2002:" then "!!" ++ (uri.drop 18).toString else uri
+  if (← peekAt 1) == some '<' then
+    adv 2
+    let mut uri := ""
+    repeat
+      match ← peek with
+      | some '>' =>
+        adv
+        break
+      | some c =>
+        if c == '\n' then fail "syntax-error" "a verbatim tag is not closed"
+        adv
+        uri := uri.push c
+      | none => fail "syntax-error" "a verbatim tag is not closed"
+    if uri.isEmpty || uri == "!" then fail "syntax-error" "a verbatim tag is empty"
+    return canon uri
+  let raw ← readName
+  if raw == "!" then return "!"
+  let body := (raw.drop 1).toString
+  match body.splitOn "!" with
+  | [_] =>
+    match ← handlePrefix "!" with
+    | some p => pure (canon (p ++ body))
+    | none => fail "syntax-error" "no primary tag handle"
+  | name :: rest@(_ :: _) =>
+    let h := "!" ++ name ++ "!"
+    match ← handlePrefix h with
+    | some p => pure (canon (p ++ "!".intercalate rest))
+    | none => fail "syntax-error" s!"the tag handle {h} is not declared by a %TAG directive"
+  | [] => fail "syntax-error" "a tag is empty"
+
 /-- Anchors (`&name`) and tags (`!!str`) before a node. -/
 def parseProps : M (Option String × Option String) := do
   let mut anchor : Option String := none
@@ -136,7 +180,7 @@ def parseProps : M (Option String × Option String) := do
       adv
       anchor := some (← readName)
     | some '!' =>
-      tag := some (← readName)
+      tag := some (← readTag)
     | _ => break
     skipInline
   pure (anchor, tag)
@@ -556,31 +600,41 @@ def keyAhead : M Bool := do
   while j < s.size && isWs s[j]! do j := j + 1
   pure (s[j]? == some ':' && isSep s[j + 1]?)
 
+/-- A mapping key, with the anchor and tag it may carry. Whatever it is, it must come out a string (4.4.2). -/
 def readKey : M String := do
-  match ← peek with
-  | some '"' => readQuoted true
-  | some '\'' => readQuoted false
-  | some '[' | some '{' => fail "mapping-key-error" "a collection is used as a mapping key"
-  | some c =>
-    if c == '&' || c == '!' || c == '*' then fail "profile-error" "properties or an alias on a mapping key are not read"
-    else if c == '%' || c == '@' || c == '`' then fail "syntax-error" s!"{c} cannot start a plain scalar; quote the key"
-    else
-      let t ← plainLine false
-      match resolvePlain t with
-      | .ok (.str s) => pure s
-      | .ok _ => fail "mapping-key-error" s!"the key {t} is not a string"
-      | .error m => fail "loading-document-failed" m
-  | none => fail "syntax-error" "a key is missing"
+  let (anchor, tag) ← parseProps
+  let j : Json ← match ← peek with
+    | some '"' => resolveScalar tag (← readQuoted true) false
+    | some '\'' => resolveScalar tag (← readQuoted false) false
+    | some '[' | some '{' => fail "mapping-key-error" "a collection is used as a mapping key"
+    | some '*' =>
+      if anchor.isSome || tag.isSome then fail "syntax-error" "an alias takes no properties"
+      else readAlias
+    | some c =>
+      if c == '%' || c == '@' || c == '`' then fail "syntax-error" s!"{c} cannot start a plain scalar; quote the key"
+      else resolveScalar tag (← plainLine false) true
+    | none => fail "syntax-error" "a key is missing"
+  match j with
+  | .str _ =>
+    register anchor j
+    pure (match j with | .str k => k | _ => "")
+  | _ => fail "mapping-key-error" "a mapping key is not a string"
 
 def addKey (kvs : List (String × Json)) (k : String) (v : Json) : M (List (String × Json)) :=
   if kvs.any (·.1 == k) then fail "loading-document-failed" s!"the key {k} is given twice"
   else pure (kvs ++ [(k, v)])
+
+/-- Does an entry of a block mapping start here: `? ` or a `key:`? -/
+def entryAhead : M Bool := do
+  if (← peek) == some '?' && isSep (← peekAt 1) then return true
+  keyAhead
 
 mutual
 
 /-- A node in block context. `n` is the indent of the collection that holds it. -/
 partial def blockNode (n : Int) (seqAtN sameLineMapOk : Bool) : M Json := do
   skipInline
+  let save ← get
   let (anchor, tag) ← parseProps
   let mut sameLine := true
   match ← peek with
@@ -604,10 +658,21 @@ partial def blockNode (n : Int) (seqAtN sameLineMapOk : Bool) : M Json := do
         let r ← parseSeq c
         checkCollectionTag tag r
         pure r
-    else if ch == '?' && isSep (← peekAt 1) then fail "mapping-key-error" "a complex mapping key (?) is not read"
-    else if ch != '*' && (← keyAhead) then
+    else if ch == '?' && isSep (← peekAt 1) then
       if sameLine && !sameLineMapOk then fail "syntax-error" "a block mapping starts on the line of its key"
-      else if sameLine && (anchor.isSome || tag.isSome) then fail "profile-error" "properties before a mapping key are not read"
+      else if sameLine && (anchor.isSome || tag.isSome) then fail "syntax-error" "properties before ? belong on the line above"
+      else
+        let r ← parseMap c
+        checkCollectionTag tag r
+        pure r
+    else if (← keyAhead) then
+      if sameLine && !sameLineMapOk then fail "syntax-error" "a block mapping starts on the line of its key"
+      else if sameLine && (anchor.isSome || tag.isSome) then
+        -- the properties on this line belong to the first key, not to the mapping
+        set save
+        skipInline
+        let r ← parseMap (← col)
+        pure r
       else
         let r ← parseMap c
         checkCollectionTag tag r
@@ -618,9 +683,7 @@ partial def blockNode (n : Int) (seqAtN sameLineMapOk : Bool) : M Json := do
       let r ← flowNode
       pure r
     else if ch == '*' then
-      let r ← readAlias
-      skipInline
-      if (← peek) == some ':' then fail "profile-error" "an alias on a mapping key is not read" else pure r
+      readAlias
     else resolveScalar tag (← readPlain n false) true
   register anchor j
   pure j
@@ -639,21 +702,38 @@ partial def parseSeq (c : Nat) : M Json := do
     unless (← peek) == some '-' && isSep (← peekAt 1) do break
   pure (Json.arr items)
 
+/-- `? key` and an optional `: value` on a line of its own at the indent of the mapping. The key node must be a string. -/
+partial def explicitEntry (c : Nat) : M (String × Json) := do
+  adv
+  let k ← blockNode (c : Int) false true
+  let key ← match k with
+    | .str s => pure s
+    | _ => fail "mapping-key-error" "a mapping key is not a string"
+  skipBlank
+  if (← col) == c && (← peek) == some ':' && isSep (← peekAt 1) then
+    adv
+    let v ← blockNode (c : Int) true true
+    pure (key, v)
+  else pure (key, Json.null)
+
 partial def parseMap (c : Nat) : M Json := do
   let mut kvs : List (String × Json) := []
   repeat
-    let key ← readKey
-    skipInline
-    unless (← peek) == some ':' do fail "syntax-error" "a ':' is missing after a key"
-    adv
-    let v ← blockNode (c : Int) true false
+    let (key, v) ← if (← peek) == some '?' && isSep (← peekAt 1) then explicitEntry c
+      else do
+        let key ← readKey
+        skipInline
+        unless (← peek) == some ':' do fail "syntax-error" "a ':' is missing after a key"
+        adv
+        let v ← blockNode (c : Int) true false
+        pure (key, v)
     kvs ← addKey kvs key v
     skipBlank
     if (← peek).isNone || (← atDocMarker) then break
     let c2 ← col
     if c2 < c then break
     if c2 > c then fail "syntax-error" "bad indentation of a mapping entry"
-    unless (← keyAhead) do fail "syntax-error" "a mapping key is expected"
+    unless (← entryAhead) do fail "syntax-error" "a mapping key is expected"
   pure (Json.mkObj kvs)
 
 /-- A node in flow context (`[...]`, `{...}`, or a scalar inside them). -/
@@ -696,10 +776,14 @@ partial def flowSeq : M Json := do
       break
     | none => fail "syntax-error" "a flow sequence is not closed"
     | _ => pure ()
+    let explicit := (← peek) == some '?' && isSep (← peekAt 1)
+    if explicit then
+      adv
+      skipBlank
     let e ← flowNode
     skipBlank
-    let item ← if (← peek) == some ':' then
-        let v ← flowValueAfterColon
+    let item ← if (← peek) == some ':' || explicit then
+        let v ← if (← peek) == some ':' then flowValueAfterColon else pure Json.null
         match e with
         | .str k => pure (Json.mkObj [(k, v)])
         | _ => fail "mapping-key-error" "a key is not a string"
@@ -725,6 +809,9 @@ partial def flowMap : M Json := do
       break
     | none => fail "syntax-error" "a flow mapping is not closed"
     | _ => pure ()
+    if (← peek) == some '?' && isSep (← peekAt 1) then
+      adv
+      skipBlank
     let k ← flowNode
     skipBlank
     let v ← if (← peek) == some ':' then flowValueAfterColon else pure Json.null
@@ -772,7 +859,7 @@ def readLine : M String := do
 partial def stream : M (Array Json) := do
   let mut docs : Array Json := #[]
   repeat
-    modify fun st => { st with anchors := [] }
+    modify fun st => { st with anchors := [], tags := [] }
     skipBlank
     let mut directives := false
     while (← peek) == some '%' && (← col) == 0 do
@@ -781,6 +868,16 @@ partial def stream : M (Array Json) := do
       if l.startsWith "%YAML" then
         let v := (l.drop 5).toString.trimAscii.toString
         if v.startsWith "1.1" || v.startsWith "1.0" then fail "profile-error" s!"YAML-LD is YAML 1.2; the document says {v}"
+      else if l.startsWith "%TAG" && (l.length == 4 || isWs (l.toList[4]!)) then
+        match ((l.drop 4).toString.replace "\t" " ").splitOn " " |>.filter (· != "") with
+        | [h, pre] =>
+          let hs := h.toList
+          let okHandle := hs.head? == some '!' && hs.getLast? == some '!' || h == "!"
+          unless okHandle do fail "syntax-error" s!"{h} is not a tag handle"
+          if (← get).tags.any (·.1 == h) then fail "syntax-error" s!"the tag handle {h} is declared twice"
+          if pre.isEmpty then fail "syntax-error" "a %TAG prefix is empty"
+          modify fun st => { st with tags := (h, pre) :: st.tags }
+        | _ => fail "syntax-error" "%TAG takes a handle and a prefix"
       else fail "profile-error" s!"the directive {l} is not read"
       skipBlank
     if (← peek).isNone then
