@@ -1,0 +1,12 @@
+cff-version: 1.2.0
+title: lean-yaml-ld
+message: If you use this software, please cite it as below.
+type: software
+license: MIT
+authors:
+  - family-names: Lee
+    given-names: K. S. Ernest (iFire)
+    orcid: https://orcid.org/0000-0001-7772-8085
+repository-code: https://github.com/V-Sekai-fire/lean-yaml-ld
+abstract: >-
+  A YAML-LD 1.0 reader and writer in Lean 4, with checks drawn from the examples of the W3C specification.

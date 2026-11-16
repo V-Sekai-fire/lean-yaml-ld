@@ -1,0 +1,93 @@
+"@context":
+  VSEKAI: https://v-sekai.org/
+  domain: VSEKAI:planning/domain/
+"@type": domain:Plan
+name: aux_route_with_compiler_and_clip_problem_plan
+domain: presence_edit
+problem: aux_route_with_compiler_and_clip_problem
+reached: true
+temporal:
+  consistent: true
+  origin: '2026-11-15T08:00:00Z'
+  total: PT1H31M1S
+steps:
+- action: relabel-coco
+  params: []
+  start: '2026-11-15T08:00:00Z'
+  end: '2026-11-15T08:00:07.810Z'
+  duration: PT7.81S
+- action: make-synth-set
+  params: []
+  start: '2026-11-15T08:00:00Z'
+  end: '2026-11-15T08:08:32Z'
+  duration: PT8M32S
+- action: train-part-detector
+  params: []
+  start: '2026-11-15T08:08:32Z'
+  end: '2026-11-15T08:27:56Z'
+  duration: PT19M24S
+- action: use-dataset-mesh
+  params: []
+  start: '2026-11-15T08:00:00Z'
+  end: '2026-11-15T08:00:01Z'
+  duration: PT1S
+- action: ingest-usd
+  params: []
+  start: '2026-11-15T08:00:01Z'
+  end: '2026-11-15T08:00:01.658Z'
+  duration: PT0.658S
+- action: unitise-source
+  params: []
+  start: '2026-11-15T08:00:01.658Z'
+  end: '2026-11-15T08:00:02.356Z'
+  duration: PT0.698S
+- action: segment-labels
+  params: []
+  start: '2026-11-15T08:27:56Z'
+  end: '2026-11-15T08:28:56Z'
+  duration: PT1M
+- action: write-scale-sidecar
+  params: []
+  start: '2026-11-15T08:00:02.356Z'
+  end: '2026-11-15T08:00:02.779Z'
+  duration: PT0.423S
+- action: restore-units
+  params: []
+  start: '2026-11-15T08:28:56Z'
+  end: '2026-11-15T08:28:56.741Z'
+  duration: PT0.741S
+- action: close-labelling
+  params: []
+  start: '2026-11-15T08:28:56.741Z'
+  end: '2026-11-15T08:28:56.741Z'
+  duration: PT0S
+- action: build-warp
+  params: []
+  start: '2026-11-15T08:00:00Z'
+  end: '2026-11-15T08:30:00Z'
+  duration: PT30M
+- action: measure-motion-lag
+  params: []
+  start: '2026-11-15T08:30:00Z'
+  end: '2026-11-15T09:30:00Z'
+  duration: PT1H
+- action: classify-soft-rigid
+  params: []
+  start: '2026-11-15T09:30:00Z'
+  end: '2026-11-15T09:30:01Z'
+  duration: PT1S
+- action: make-hair-cards
+  params: []
+  start: '2026-11-15T08:00:00Z'
+  end: '2026-11-15T08:00:21.082Z'
+  duration: PT21.082S
+- action: make-spring-chains
+  params: []
+  start: '2026-11-15T08:00:21.082Z'
+  end: '2026-11-15T08:00:23.082Z'
+  duration: PT2S
+- action: rig-aux-parts
+  params: []
+  start: '2026-11-15T09:30:01Z'
+  end: '2026-11-15T09:31:01Z'
+  duration: PT1M
