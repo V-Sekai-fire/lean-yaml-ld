@@ -316,6 +316,9 @@ def main (args : List String) : IO UInt32 := do
   let netFails := fails.filter fun f => net.any (fun i => f.startsWith (i ++ ":"))
   skips := skips ++ netFails.map fun f => (f.splitOn ":").head! ++ " (needs the network)"
   fails := fails.filter fun f => !netFails.contains f
+  -- set JSONLD_SHOW_SKIPS to list the skipped tests and why
+  if (← IO.getEnv "JSONLD_SHOW_SKIPS").isSome then
+    for k in skips do IO.println s!"SKIP {k}"
   for f in fails do IO.println s!"FAIL {f}"
   IO.println s!"{pass} pass, {fails.length} fail, {skips.length} skipped"
   pure (if fails.isEmpty then 0 else 1)

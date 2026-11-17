@@ -1,6 +1,6 @@
 # lean-yaml-ld
 
-A reader and writer for [YAML-LD 1.0](https://www.w3.org/TR/yaml-ld/) in Lean 4. It turns a YAML-LD stream into `Lean.Json` and back. It has no dependency beyond Lean itself.
+A reader and writer for [YAML-LD 1.0](https://www.w3.org/TR/yaml-ld/) in Lean 4, and a JSON-LD 1.1 processor to go with it. `YamlLd` turns a YAML-LD stream into `Lean.Json` and back; `JsonLd` expands, compacts, flattens, frames and converts to and from RDF. Neither has a dependency beyond Lean itself. The library reads no HTML and opens no sockets; both stay in the test runner (see below).
 
 ## Use it
 
@@ -36,6 +36,20 @@ Errors are strings that start with the specification's code: `mapping-key-error`
 
 JSON is YAML, so a JSON-LD file reads through it too.
 
+Expand a YAML-LD document with the processor. It takes a document loader as a callback, for remote contexts:
+
+    import YamlLd
+    import JsonLd
+    open Lean
+
+    def loader : String → IO (Except String Json) := fun _ => pure (.error "no loader")
+
+    def main : IO Unit := do
+      let .ok doc := YamlLd.parse "\"@context\": {\"@vocab\": \"http://example/\"}\nname: Ada\n" | return
+      match ← ((JsonLd.expand doc (some "http://example/doc")).run { loader }).run with
+      | .ok j => IO.println j.compress   -- [{"http://example/name":[{"@value":"Ada"}]}]
+      | .error e => IO.println e
+
 ## Checks
 
 `./make.sh` builds and runs `yamlld_witness`. Its checks come in three kinds, and a check that can fail has a control that makes it:
@@ -46,33 +60,56 @@ JSON is YAML, so a JSON-LD file reads through it too.
 
 ## The JSON-LD processor
 
-`JsonLd` is a JSON-LD 1.1 processor in Lean: IRI resolution (RFC 3986), context processing, IRI expansion and the expansion algorithm, with scoped contexts, `@import`, `@nest`, `@reverse`, `@json`, index, id, type, language and graph maps, and protected terms. `JsonLd.expand` takes a `Lean.Json` document, a base IRI and a document loader. `JsonLd.flattenExpanded` flattens, `JsonLd.compactDoc` compacts against a context, and `JsonLd.toRdfQuads` writes N-Quads. `JsonLd.fromRdf` reads N-Quads and `JsonLd.frameDoc` frames. The library does not read HTML or fetch over HTTP: the test runner finds `<script>` elements with `HtmlScripts` and loads documents from disk, and the library takes a document loader as a callback. `JsonLd.Remote.load` makes the document loader's decisions (redirects, the `Link` header, the content type) over any transport function; the test runner answers it from the manifest's options instead of a socket.
+`JsonLd` is a JSON-LD 1.1 processor. Every function runs in `JsonLd.PM`, which carries a `Cfg` (the document loader) and fails with the JSON-LD API's error codes as strings.
+
+| Function | What it does |
+| --- | --- |
+| `JsonLd.expand` | expansion: context processing, scoped contexts, `@import`, `@nest`, `@reverse`, `@json`, index, id, type, language and graph maps, protected terms |
+| `JsonLd.flattenExpanded` | flattening, with blank node labels |
+| `JsonLd.compactDoc` | compaction against a context; `CompOpts.graph` always wraps flattened nodes in `@graph` |
+| `JsonLd.toRdfQuads` | N-Quads from an expanded document |
+| `JsonLd.fromRdf` | JSON-LD from quads read by `JsonLd.parseNQuads` |
+| `JsonLd.frameDoc` | framing |
+| `JsonLd.Remote.load` | the document loader's decisions (redirects, the `Link` header, the content type) over any transport function |
+
+The library reads no HTML and has no HTTP client. `HtmlScripts` (used only by the test runner) finds `<script>` elements and `<base href>` in an HTML file; the caller parses what it finds with `YamlLd` or `Lean.Json`. The test runner answers `JsonLd.Remote.load` from each test's options instead of a socket. Lean's standard library has no TLS client, so it fetches a network document with `curl`.
 
 ## The W3C test suites
 
-`jsonld_suite <tests-dir> <manifest>` runs the expand, toRdf, fromRdf, flatten, compact and frame tests of a manifest (`./run-suite.sh` runs each test in its own process with a time limit). A negative test must give the manifest's error code, and a positive test must give the expected output, with arrays compared as sets except in `@list`. Other test kinds, and tests of remote loading by HTTP are listed as skipped. A test that names a document outside the suite fetches it with `curl`, since Lean's standard library has no TLS client; a fetch that fails skips the test, never as passed.
+`jsonld_suite <tests-dir> <manifest> [id]` runs the tests of a W3C manifest against the processor. `./run-suite.sh` runs each test in its own process with a time limit, so a hang is one failure. CI runs `./make.sh` and every manifest below, and fails on any failure. A negative test must give the manifest's error code, and a positive test must give the expected output, with arrays compared as sets except in `@list`; blank node labels are compared up to renaming. Set `JSONLD_SHOW_SKIPS` to list the skipped tests.
+
+A skipped test is never counted as passed. What is skipped, and why:
+
+- **JSON-LD 1.0 mode.** Tests with `processingMode` or `specVersion` `json-ld-1.0`: the processor is 1.1 only. This is all the skips in expand, fromRdf, flatten, compact and frame, and 19 of toRdf.
+- **Syntax tests.** The 16 `PositiveSyntaxTest` tests in toRdf are not run: the runner has no check for that kind.
+- **Extended Profile.** The 5 yaml-ld tests with `extendedYAML`.
+- **A contradiction in the suite.** `tr006` in html expects empty output for an HTML file with no script; `te006` expects `loading document failed` for the same file. `te006` is run.
+- **No network.** A test that names a document outside the suite (an `https://` context) is skipped if `curl` cannot fetch it. None is skipped in CI.
+
+Where the specification text and a test disagree, the test wins: after a 303 redirect the document URL is the target's (`#t0006` in remote-doc).
 
 | Manifest | Pass | Fail | Skipped |
 | --- | --- | --- | --- |
 | json-ld-api `expand-manifest.jsonld` | 368 | 0 | 18 |
 | json-ld-api `toRdf-manifest.jsonld` | 432 | 0 | 35 |
 | json-ld-api `fromRdf-manifest.jsonld` | 53 | 0 | 1 |
-| json-ld-api `html-manifest.jsonld` | 49 | 0 | 1 |
-| json-ld-api `remote-doc-manifest.jsonld` | 18 | 0 | 0 |
 | json-ld-api `flatten-manifest.jsonld` | 55 | 0 | 3 |
 | json-ld-api `compact-manifest.jsonld` | 233 | 0 | 13 |
+| json-ld-api `html-manifest.jsonld` | 49 | 0 | 1 |
+| json-ld-api `remote-doc-manifest.jsonld` | 18 | 0 | 0 |
 | json-ld-framing `frame-manifest.jsonld` | 73 | 0 | 19 |
-| yaml-ld `manifest.jsonld` (expand, toRdf, flatten, compact) | 92 | 0 | 5 |
+| yaml-ld `manifest.jsonld` | 92 | 0 | 5 |
 
 Where YAML-LD and JSON-LD disagree, YAML-LD wins, for documents read from a YAML-LD file (`.yamlld`, `.yaml`): a context document may be a bare context with no `@context` entry (`Cfg.bareContext`), and a top-level node whose properties were all null keeps its `@id` (`ExpOpts.keepIdOnly`). JSON-LD documents follow the JSON-LD API as before.
 
 ## What it does not have
 
 - Tabs as indentation, and a block mapping on the line of `---`. Each is refused with an error, not read wrongly.
-- JSON-LD processing. This reads YAML-LD into JSON; expansion, compaction and framing are not here.
 - The YAML-LD Extended Profile.
+- JSON-LD 1.0 processing mode.
+- HTML extraction and an HTTP client in the library. They belong to the caller, who passes a document loader.
 - The writer lists keys sorted, because `Lean.Json` keeps them sorted. Key order is not data in YAML-LD.
-- Expansion-level checks of the W3C suite. See below for what is run.
+- A claim of conformance in the sense of section 2.2 of YAML-LD 1.0. The suites above pass except for the skips listed, but nobody outside this repository has reviewed that.
 
 ## Licence
 
