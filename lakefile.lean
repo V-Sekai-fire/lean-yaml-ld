@@ -15,3 +15,6 @@ lean_exe yamlld_witness where
   root := `YamlLdWitness
 lean_exe jsonld_suite where
   root := `JsonLdSuite
+
+lean_exe jsonld_to_yamlld where
+  root := `JsonToYamlLd
